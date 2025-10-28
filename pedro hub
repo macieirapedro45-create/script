@@ -1,0 +1,286 @@
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local PlayerGui = player:WaitForChild("PlayerGui")
+
+local basePosition = nil
+local flying, flyingToBase, fly10s = false, false, false
+local flyConnection
+local verticalDirection = 0
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if not gameProcessed and input.UserInputType == Enum.UserInputType.Keyboard then
+		if input.KeyCode == Enum.KeyCode.P then
+			local char = player.Character
+			if char and char:FindFirstChild("HumanoidRootPart") then
+				basePosition = char.HumanoidRootPart.Position
+			end
+		elseif (flying or fly10s) then
+			if input.KeyCode == Enum.KeyCode.E then
+				verticalDirection = 1
+			elseif input.KeyCode == Enum.KeyCode.Q then
+				verticalDirection = -1
+			end
+		end
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input, gp)
+	if (flying or fly10s) and not gp and input.UserInputType == Enum.UserInputType.Keyboard then
+		if input.KeyCode == Enum.KeyCode.E or input.KeyCode == Enum.KeyCode.Q then
+			verticalDirection = 0
+		end
+	end
+end)
+
+local function getHighestPlayerY()
+	local highest = -math.huge
+	for _,plr in ipairs(Players:GetPlayers()) do
+		if plr ~= player and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
+			local y = plr.Character.HumanoidRootPart.Position.Y
+			if y > highest then
+				highest = y
+			end
+		end
+	end
+	return highest
+end
+
+local function stopAllFlying()
+	flying, flyingToBase, fly10s = false, false, false
+	local char = player.Character
+	if char then
+		local hrp = char:FindFirstChild("HumanoidRootPart")
+		if hrp then
+			for _,v in ipairs({"FlyInf","Fly10s","FlyToBase"}) do
+				if hrp:FindFirstChild(v) then hrp[v]:Destroy() end
+			end
+		end
+		local hum = char:FindFirstChildOfClass("Humanoid")
+		if hum then hum.PlatformStand = false end
+	end
+	if flyConnection then flyConnection:Disconnect() end
+	verticalDirection = 0
+end
+
+local function startFlyingAbovePlayers()
+	stopAllFlying()
+	flying = true
+	local char = player.Character
+	if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+	local hrp = char.HumanoidRootPart
+
+	flyConnection = RunService.RenderStepped:Connect(function()
+		if not flying or not char.Parent then stopAllFlying() return end
+		local highestY = getHighestPlayerY()
+		local targetY = (highestY == -math.huge and hrp.Position.Y or highestY + 3)
+		local currentY = hrp.Position.Y
+		local desiredY = currentY
+
+		if verticalDirection ~= 0 then
+			desiredY = currentY + verticalDirection * 0.5
+		elseif currentY < targetY then
+			desiredY = currentY + 0.3
+		elseif currentY > targetY + 1 then
+			desiredY = currentY - 0.3
+		end
+
+		local velocity = Vector3.new(0, math.clamp((desiredY - currentY) * 15, -15, 15), 0)
+		local bv = hrp:FindFirstChild("FlyInf") or Instance.new("BodyVelocity")
+		bv.Name, bv.MaxForce, bv.Parent = "FlyInf", Vector3.new(0,1,0)*1e5, hrp
+		bv.Velocity = velocity
+	end)
+end
+
+local function startFlyingToBase()
+	stopAllFlying()
+	if not basePosition then return end
+	flyingToBase = true
+	local char = player.Character
+	if not char then return end
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	if not hrp or not hum then return end
+	hum.PlatformStand = true
+
+	flyConnection = RunService.RenderStepped:Connect(function()
+		if not flyingToBase or not char.Parent then stopAllFlying() return end
+		local highestY = getHighestPlayerY()
+		local minHeight = (highestY == -math.huge and hrp.Position.Y or highestY + 3)
+		local targetPos = Vector3.new(basePosition.X, math.max(basePosition.Y, minHeight), basePosition.Z)
+		local direction = (targetPos - hrp.Position)
+		local dist = direction.Magnitude
+		if dist < 1 then stopAllFlying() return end
+		local velocity = direction.Unit * math.min(dist, 15)
+		if math.abs(velocity.Y) > 15 then
+			velocity = Vector3.new(velocity.X, math.clamp(velocity.Y, -15, 15), velocity.Z)
+		end
+		local bv = hrp:FindFirstChild("FlyToBase") or Instance.new("BodyVelocity")
+		bv.Name, bv.MaxForce, bv.Parent = "FlyToBase", Vector3.new(1,1,1)*1e5, hrp
+		bv.Velocity = velocity
+	end)
+end
+
+local function startFly10s()
+	stopAllFlying()
+	fly10s = true
+	local char = player.Character
+	if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+	local hrp = char.HumanoidRootPart
+	local startTime = tick()
+
+	flyConnection = RunService.RenderStepped:Connect(function()
+		if not fly10s or not char.Parent then stopAllFlying() return end
+		local vertical = (verticalDirection == 1 and 15) or (verticalDirection == -1 and -15) or 40
+		local bv = hrp:FindFirstChild("Fly10s") or Instance.new("BodyVelocity")
+		bv.Name, bv.MaxForce, bv.Parent = "Fly10s", Vector3.new(0,1,0)*1e5, hrp
+		bv.Velocity = Vector3.new(0, vertical, 0)
+		if tick() - startTime > 10 then stopAllFlying() end
+	end)
+end
+
+-- GUI
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "PedroHub"
+screenGui.Parent = PlayerGui
+screenGui.ResetOnSpawn = false
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 600, 0, 370)
+mainFrame.Position = UDim2.new(0.5, -300, 0.5, -185)
+mainFrame.BackgroundColor3 = Color3.fromRGB(255,255,255)
+mainFrame.Active, mainFrame.Draggable = true, true
+mainFrame.Parent = screenGui
+
+local sideBar = Instance.new("Frame")
+sideBar.Size = UDim2.new(0, 110, 1, 0)
+sideBar.BackgroundColor3 = Color3.fromRGB(18,47,255)
+sideBar.Parent = mainFrame
+
+local function createTabButton(name, yPos)
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(1, -20, 0, 48)
+	btn.Position = UDim2.new(0, 10, 0, yPos)
+	btn.BackgroundColor3 = Color3.new(1,1,1)
+	btn.Font, btn.TextSize, btn.TextColor3 = Enum.Font.SourceSansBold, 25, Color3.new(0,0,0)
+	btn.Text = name
+	btn.Parent = sideBar
+	return btn
+end
+
+local hubBtn = createTabButton("pedro hub", 24)
+local creditsBtn = createTabButton("credits", 85)
+local stealerBtn = createTabButton("stealer", 146)
+
+local contentFrame = Instance.new("Frame")
+contentFrame.Size = UDim2.new(1, -130, 1, -20)
+contentFrame.Position = UDim2.new(0, 120, 0, 10)
+contentFrame.BackgroundColor3 = Color3.fromRGB(255,255,255)
+contentFrame.Parent = mainFrame
+
+local function clearContent()
+	for _,v in pairs(contentFrame:GetChildren()) do v:Destroy() end
+end
+
+local function showCredits()
+	clearContent()
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(1, 0, 0, 60)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.SourceSansBold
+	label.TextSize = 32
+	label.TextColor3 = Color3.new(0,0,0)
+	label.Text = "Créditos: pedrao preao + roblox"
+	label.Parent = contentFrame
+end
+
+local function showStealer()
+	clearContent()
+	local box = Instance.new("Frame")
+	box.Size = UDim2.new(0.95, 0, 0.8, 0)
+	box.Position = UDim2.new(0.025, 0, 0.08, 0)
+	box.BackgroundColor3 = Color3.fromRGB(80,170,255)
+	box.BorderSizePixel = 0
+	box.Parent = contentFrame
+
+	local function setButtonColor(btn, enabled)
+		btn.BackgroundColor3 = enabled and Color3.fromRGB(255,0,0) or Color3.fromRGB(160,160,160)
+	end
+
+	local options = {
+		{label="fly to base", func=startFlyingToBase, check=function() return basePosition ~= nil end},
+		{label="fly 10 s", func=startFly10s, check=function() return true end},
+		{label="fly inf", func=startFlyingAbovePlayers, check=function() return true end}
+	}
+
+	for i,opt in ipairs(options) do
+		local row = Instance.new("Frame")
+		row.Size = UDim2.new(0.9, 0, 0, 54)
+		row.Position = UDim2.new(0.05, 0, 0, 16 + (i-1)*64)
+		row.BackgroundTransparency = 1
+		row.Parent = box
+
+		local txt = Instance.new("TextLabel")
+		txt.Size = UDim2.new(0.62, 0, 1, 0)
+		txt.BackgroundTransparency = 1
+		txt.Font, txt.TextSize, txt.TextColor3 = Enum.Font.SourceSans, 25, Color3.new(0,0,0)
+		txt.Text = opt.label
+		txt.TextXAlignment = Enum.TextXAlignment.Left
+		txt.Parent = row
+
+		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.new(0.32, 0, 0.75, 0)
+		btn.Position = UDim2.new(0.65, 0, 0.12, 0)
+		btn.Font = Enum.Font.SourceSansBold
+		btn.Text = ""
+		btn.Parent = row
+
+		setButtonColor(btn, opt.check())
+		btn.MouseButton1Click:Connect(function()
+			if opt.check() then opt.func() end
+		end)
+
+		task.spawn(function()
+			while box.Parent do
+				setButtonColor(btn, opt.check())
+				task.wait(0.5)
+			end
+		end)
+	end
+
+	local stopBtn = Instance.new("TextButton")
+	stopBtn.Size = UDim2.new(0.32, 0, 0, 34)
+	stopBtn.Position = UDim2.new(0.65, 0, 0.81, 0)
+	stopBtn.BackgroundColor3 = Color3.fromRGB(255,80,80)
+	stopBtn.Font = Enum.Font.SourceSansBold
+	stopBtn.Text = "Parar voo"
+	stopBtn.TextColor3 = Color3.new(1,1,1)
+	stopBtn.Parent = box
+	stopBtn.MouseButton1Click:Connect(stopAllFlying)
+end
+
+local function showHub()
+	clearContent()
+end
+
+hubBtn.MouseButton1Click:Connect(showHub)
+creditsBtn.MouseButton1Click:Connect(showCredits)
+stealerBtn.MouseButton1Click:Connect(showStealer)
+
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 54, 0, 54)
+closeBtn.Position = UDim2.new(1, -58, 0, 8)
+closeBtn.BackgroundTransparency = 1
+closeBtn.Text = "X"
+closeBtn.Font = Enum.Font.SourceSansBold
+closeBtn.TextSize = 54
+closeBtn.TextColor3 = Color3.fromRGB(255,0,0)
+closeBtn.Parent = mainFrame
+closeBtn.MouseButton1Click:Connect(function()
+	screenGui:Destroy()
+end)
+
+showHub()
+
